@@ -71,4 +71,5 @@ Open: http://127.0.0.1:8000/
   Your browser does not support the video tag.
 </video>
 
+ - You can check demo video in demo folder of this project.
 
