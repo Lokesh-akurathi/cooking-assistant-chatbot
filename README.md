@@ -67,8 +67,8 @@ Open: http://127.0.0.1:8000/
 - This design enforces consistent UX and predictable LLM behavior for ingredient accumulation and recipe delivery.
 
 ## 🎥 Demo Video
-<video src="demo video/cooking assistant chatbot demo.mp4" controls width="600">
+<video src="demo/cooking_assistant_chatbot_demo.mp4" controls width="600">
   Your browser does not support the video tag.
-</video>s
+</video>
 
 
