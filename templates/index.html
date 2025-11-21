@@ -1,0 +1,169 @@
+<!doctype html>
+<html>
+<head>
+  {% load static %}
+  <meta charset="utf-8" />
+  <title>Cooking Assistant chatbot</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="{% static 'style.css' %}">
+</head>
+
+<body>
+
+<div id="chat-container">
+  <div id="header">
+    <div style="display:flex; flex-direction:column;">
+      <div id="title">Your Cooking Assistant on board!</div>
+    </div>
+  </div>
+
+  <div id="chat" aria-live="polite"></div>
+
+  <div id="composer">
+    <textarea id="input" placeholder="Tell me what ingredients you have..." rows="1"></textarea>
+    <button id="send">Send</button>
+  </div>
+</div>
+
+<script>
+
+const API_BASE = '/api/';                
+const MESSAGE_ENDPOINT = API_BASE + 'message/';     
+const STREAM_ENDPOINT = API_BASE + 'stream_message/';
+const CSRF_HEADER = 'X-CSRFToken';
+
+//CSRF helper
+function getCookie(name) {
+  const v = document.cookie.split('; ').find(row => row.startsWith(name + '='));
+  return v ? decodeURIComponent(v.split('=')[1]) : null;
+}
+const CSRF_TOKEN = getCookie('csrftoken');
+
+//UI helpers
+const chatEl = document.getElementById('chat');
+
+function addUserMessage(text) {
+  const row = document.createElement('div'); row.className = 'row user';
+  const msg = document.createElement('div'); msg.className = 'msg user'; msg.textContent = text;
+  const avatar = document.createElement('div'); avatar.className = 'avatar'; avatar.innerHTML = '<img src="data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2236%22 height=%2236%22><rect width=%2236%22 height=%2236%22 fill=%22%23007bff%22 rx=%228%22/><text x=%2218%22 y=%2222%22 font-size=%2214%22 font-family=%22Arial%22 text-anchor=%22middle%22 fill=%22%23fff%22>U</text></svg>' ;
+  row.appendChild(avatar); row.appendChild(msg);
+  chatEl.appendChild(row); chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function createAssistantBubble(initialText='') {
+  const row = document.createElement('div'); row.className = 'row assistant';
+  const avatar = document.createElement('div'); avatar.className = 'avatar';
+  avatar.innerHTML = '<img src="data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2236%22 height=%2236%22><rect width=%2236%22 height=%2236%22 fill=%22%23f3f4f6%22 rx=%228%22/><text x=%2218%22 y=%2222%22 font-size=%2214%22 font-family=%22Arial%22 text-anchor=%22middle%22 fill=%22%23000%22>A</text></svg>' ;
+  const wrapper = document.createElement('div'); wrapper.style.display = 'flex'; wrapper.style.flexDirection = 'column';
+  const msg = document.createElement('div'); msg.className = 'msg assistant'; msg.textContent = initialText;
+  const meta = document.createElement('div'); meta.className = 'meta muted';
+  const copyBtn = document.createElement('button'); copyBtn.className='copy-btn'; copyBtn.textContent='Copy';
+  copyBtn.onclick = () => { navigator.clipboard.writeText(msg.textContent || '').then(()=>copyBtn.textContent='Copied'); setTimeout(()=>copyBtn.textContent='Copy',1200); };
+  meta.appendChild(copyBtn);
+  wrapper.appendChild(msg); wrapper.appendChild(meta);
+  row.appendChild(avatar); row.appendChild(wrapper);
+  chatEl.appendChild(row); chatEl.scrollTop = chatEl.scrollHeight;
+  return { row, msg, meta, copyBtn };
+}
+
+function makeTypingNode(){
+  const node = document.createElement('span'); node.className='typing';
+  node.innerHTML = '<span class="dots"><span></span><span></span><span></span></span>';
+  return node;
+}
+
+//API helprs
+async function postJson(path, body){
+  const opts = { method:'POST', headers:{ 'Content-Type':'application/json' }, credentials:'same-origin', body: JSON.stringify(body) };
+  if (CSRF_TOKEN) opts.headers[CSRF_HEADER] = CSRF_TOKEN;
+  const res = await fetch(path, opts);
+  const text = await res.text();
+  try { return JSON.parse(text); } catch(e){ return { status: res.status, text } }
+}
+
+// streaming: tries streaming endpoint, falls back to normal endpoint
+async function streamMessage(text) {
+  const { row, msg, meta } = createAssistantBubble('');
+  const typingNode = makeTypingNode();
+  meta.appendChild(typingNode);
+
+
+  try {
+    const controller = new AbortController();
+    const streamRes = await fetch(STREAM_ENDPOINT, {
+      method:'POST',
+      credentials:'same-origin',
+      headers: (() => { const h = {}; if (CSRF_TOKEN) h[CSRF_HEADER] = CSRF_TOKEN; h['Content-Type']='application/json'; return h })(),
+      body: JSON.stringify({ text }),
+      signal: controller.signal
+    });
+
+    if (!streamRes.ok || !streamRes.body) throw new Error('No stream available');
+
+    const reader = streamRes.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let done = false;
+    let accumulated = '';
+    // read chunks as they arrive and append progressively
+    while (!done) {
+      const { value, done: doneReading } = await reader.read();
+      done = doneReading;
+      if (value) {
+        const chunk = decoder.decode(value, { stream: true });
+        accumulated += chunk;
+        // update bubble text progressively
+        msg.textContent = accumulated;
+        chatEl.scrollTop = chatEl.scrollHeight;
+      }
+    }
+    // stream finished
+    meta.removeChild(typingNode);
+    return accumulated;
+  } catch (e) {
+    // streamng failed - falllback to simple POST
+    meta.removeChild(typingNode);
+    const res = await postJson(MESSAGE_ENDPOINT, { text });
+    const assistant_text = res.assistant_text || res.text || 'Sorry, I had trouble.';
+    // show full message
+    msg.textContent = assistant_text;
+    return assistant_text;
+  }
+}
+
+/* --------- main UI logic --------- */
+function addInitialIfEmpty(){
+  if (chatEl.children.length === 0) {
+    const { row, msg } = createAssistantBubble("Hi! Tell me what ingredients you have, and I'll suggest 3-5 meal ideas. If you want a recipe, ask for it.");
+  }
+}
+
+addInitialIfEmpty();
+
+async function sendMessage() {
+  const input = document.getElementById('input');
+  const text = input.value.trim();
+  if (!text) return;
+  addUserMessage(text);
+  input.value = '';
+  await streamMessage(text);
+}
+
+document.getElementById('send').addEventListener('click', sendMessage);
+document.getElementById('input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+
+const ta = document.getElementById('input');
+ta.addEventListener('input', () => {
+  ta.style.height = 'auto';
+  ta.style.height = (ta.scrollHeight) + 'px';
+});
+
+</script>
+
+</body>
+</html>
