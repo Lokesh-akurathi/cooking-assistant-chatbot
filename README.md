@@ -66,4 +66,9 @@ Open: http://127.0.0.1:8000/
 - Remember and accumulate ingredient context unless the user explicitly removes/replaces items
 - This design enforces consistent UX and predictable LLM behavior for ingredient accumulation and recipe delivery.
 
+## 🎥 Demo Video
+<video src="demo video/cooking assistant chatbot demo.mp4" controls width="600">
+  Your browser does not support the video tag.
+</video>s
+
 
